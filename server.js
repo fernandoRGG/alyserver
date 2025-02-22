@@ -1,5 +1,5 @@
 const WebSocket = require('ws');
-const port = localprocess.env.PORT || 8081;  // Usa el puerto de Render o 8080 si estás en localprocess.env.PORT ||
+const port = process.env.PORT || 8081;  // Usa el puerto de Render o 8080 si estás en localprocess.env.PORT ||
 const wss = new WebSocket.Server({ port });
 let clients = [];
 wss.on('connection', (ws) => {
