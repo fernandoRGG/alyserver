@@ -1,0 +1,13 @@
+{
+    "name": "alycuatro-server",
+    "version": "1.0.0",
+    "description": "Servidor WebSocket para alycuatro",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js"
+    },
+    "dependencies": {
+      "ws": "^8.11.0"
+    }
+  }
+  
