@@ -1,0 +1,168 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Revelar Imagen por Partes</title>
+    <style>
+        body {
+            padding-top: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            margin-top: 20px;
+            background-color: #ffffff00;
+        }
+        canvas {
+            border: 2px solid black;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            background-color: rgb(145, 143, 143);
+        }
+        button,
+        input {
+            padding: 10px 20px !important;
+            font-size: 16px !important;
+            cursor: pointer !important;
+            margin: 5px !important;
+            border-radius: 10px !important;
+        }
+        .container {
+            text-align: center !important;
+        }
+        .loading {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            z-index: 1000;
+            display: none;
+        }
+    </style>
+    <script>
+        const socket = new WebSocket('ws://localhost:8080');
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const button = document.getElementById('fillButton');
+            const clearButton = document.getElementById('clearButton');
+            const pixelBatchInput = document.getElementById('pixelBatchInput');
+            const loadingScreen = document.getElementById('loading');
+            const img = new Image();
+            const segmentSize = 200;
+            let segmentIndices = [];
+            let currentSegmentIndex = 0;
+            let imageData;
+            let revealedPixels = JSON.parse(localStorage.getItem('revealedPixels')) || [];
+            img.src = 'aly.png';
+            img.onload = () => {
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = canvas.width;
+                tempCanvas.height = canvas.height;
+                tempCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                imageData = tempCtx.getImageData(0, 0, canvas.width, canvas.height);
+                const totalSegmentsX = Math.ceil(canvas.width / segmentSize);
+                const totalSegmentsY = Math.ceil(canvas.height / segmentSize);
+                for (let y = 0; y < totalSegmentsY; y++) {
+                    for (let x = 0; x < totalSegmentsX; x++) {
+                        segmentIndices.push({ x, y, filledPixels: 0 });
+                    }
+                }
+                segmentIndices = segmentIndices.sort(() => Math.random() - 0.5);
+                // Restaurar progreso previo
+                revealedPixels.forEach(pixel => drawPixel(pixel.x, pixel.y));
+                button.disabled = false;
+            };
+            button.addEventListener('click', async () => {
+                const pixelBatch = parseInt(pixelBatchInput.value, 10);
+                if (isNaN(pixelBatch) || pixelBatch <= 0) {
+                    alert('Por favor, ingresa un número válido de segmentos.');
+                    return;
+                }
+                if (segmentIndices.some(segment => segment.filledPixels < segmentSize * segmentSize)) {
+                    loadingScreen.style.display = 'flex';
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    let pixelsToReveal = pixelBatch;
+                    while (pixelsToReveal > 0) {
+                        const segment = segmentIndices[currentSegmentIndex];
+                        if (segment.filledPixels < segmentSize * segmentSize) {
+                            pixelsToReveal = fillSegmentRandomly(segment, pixelsToReveal);
+                        }
+                        currentSegmentIndex = (currentSegmentIndex + 1) % segmentIndices.length;
+                    }
+                    loadingScreen.style.display = 'none';
+                    // Enviar actualización a través del WebSocket
+                    socket.send(JSON.stringify({ type: 'update', pixels: revealedPixels }));
+                    // Guardar progreso en localStorage
+                    localStorage.setItem('revealedPixels', JSON.stringify(revealedPixels));
+                } else {
+                    alert('La imagen ya está completamente mostrada.');
+                }
+            });
+            clearButton.addEventListener('click', () => {
+                // Enviar reinicio a través del WebSocket
+                socket.send(JSON.stringify({ type: 'clear' }));
+                localStorage.removeItem('revealedPixels');
+                location.reload();
+            });
+            function fillSegmentRandomly(segment, pixelsToReveal) {
+                const startX = segment.x * segmentSize;
+                const startY = segment.y * segmentSize;
+                const pixels = [];
+                for (let y = startY; y < startY + segmentSize; y++) {
+                    for (let x = startX; x < startX + segmentSize; x++) {
+                        if (x < canvas.width && y < canvas.height && !revealedPixels.some(p => p.x === x && p.y === y)) {
+                            pixels.push({ x, y });
+                        }
+                    }
+                }
+                const randomPixels = pixels.sort(() => Math.random() - 0.5).slice(0, Math.min(pixelsToReveal, pixels.length));
+                randomPixels.forEach(pixel => {
+                    drawPixel(pixel.x, pixel.y);
+                    revealedPixels.push(pixel);
+                });
+                segment.filledPixels += randomPixels.length;
+                return pixelsToReveal - randomPixels.length;
+            }
+            function drawPixel(x, y) {
+                const pixelPos = (y * canvas.width + x) * 4;
+                const r = imageData.data[pixelPos];
+                const g = imageData.data[pixelPos + 1];
+                const b = imageData.data[pixelPos + 2];
+                const a = imageData.data[pixelPos + 3];
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a / 255})`;
+                ctx.fillRect(x, y, 2, 2);
+            }
+            socket.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                if (message.type === 'update') {
+                    message.pixels.forEach(pixel => drawPixel(pixel.x, pixel.y));
+                } else if (message.type === 'clear') {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            };
+        });
+    </script>
+    
+</head>
+<body>
+    <div id="loading" class="loading">Cargando...</div>
+    <canvas id="canvas" width="2400" height="2400"></canvas>
+    <div class="container">
+        <input type="number" id="pixelBatchInput" placeholder="Ingresa el número de segmentos" min="1" />
+        <button id="fillButton" disabled>Mostrar más partes</button>
+        <button id="clearButton">Reiniciar</button>
+    </div>
+</body>
+</html>
